@@ -1,0 +1,19 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "whichprovides"
+requires-python = ">=3.9"
+dynamic = ["version"]
+
+[tool.hatch.version]
+path = "src/whichprovides/__init__.py"
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "src/whichprovides/",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/whichprovides"]
