@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+
 """
 Module which provides (heh) 'yum provides'
 functionality across many package managers.
@@ -25,17 +27,21 @@ _APT_FILE_SEARCH_RE = re.compile(r"^([^:]+): ")
 @dataclasses.dataclass
 class ProvidedBy:
     package_type: str
-    distro: str | None
     package_name: str
     package_version: str
+    distro: str | None = None
 
     @property
     def purl(self) -> str:
         """The Package URL (PURL) of the providing package"""
-        parts = ["pkg:", quote(self.package_type), "/"]
+        # PURL disallows many characters in the package type field.
+        if not re.match(r"^[a-zA-Z0-9\+\-\.]+$", self.package_type):
+            raise ValueError("Package type must be ASCII letters, numbers, +, -, and .")
+
+        parts = ["pkg:", self.package_type.lower(), "/"]
         if self.distro:
-            parts.extend((quote(self.distro), "/"))
-        parts.extend((self.package_name, "@", self.package_version))
+            parts.extend((_quote_purl(self.distro), "/"))
+        parts.extend((_quote_purl(self.package_name), "@", _quote_purl(self.package_version)))
         return "".join(parts)
 
 
@@ -200,6 +206,14 @@ def whichprovides(filepath: str) -> ProvidedBy | None:
             pass
 
     return None
+
+
+def _quote_purl(value: str) -> str:
+    """
+    Quotes according to PURL rules which are different from
+    typical URL percent encoding.
+    """
+    return quote(value, safe='')
 
 
 def _main():

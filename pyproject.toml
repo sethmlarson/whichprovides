@@ -1,10 +1,12 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [project]
 name = "whichprovides"
 requires-python = ">=3.9"
+license = "MIT"
+license-files = ["LICENSE"]
 dynamic = ["version"]
 
 [tool.hatch.version]
@@ -13,6 +15,7 @@ path = "src/whichprovides/__init__.py"
 [tool.hatch.build.targets.sdist]
 include = [
   "src/whichprovides/",
+  "tests/"
 ]
 
 [tool.hatch.build.targets.wheel]

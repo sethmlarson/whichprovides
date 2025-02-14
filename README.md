@@ -4,10 +4,17 @@ Package manager agnostic support for "`yum whichprovides`"
 which maps a file back to its providing package. This is
 useful for generating a package URL (PURL) identifier.
 
-You can install the package like so:
+You can install the package from PyPI like so:
 
 ```terminal
 $ python -m pip install whichprovides
+```
+
+You can also "splat" the module into your own projects:
+
+```terminal
+$ git clone https://codeberg.org/sethmlarson/whichprovides
+$ cp whichprovides/src/whichprovides/__init__.py ./whichprovides.py
 ```
 
 Then use the `whichprovides()` API inside of Python code:
