@@ -18,7 +18,7 @@ __version__ = "0.1.0"
 
 _PACKAGE_MANAGER_BINS: dict[str, str | typing.Literal[False]] = {}
 _OS_RELEASE_LINES_RE = re.compile(r"^([A-Z_]+)=(?:\"([^\"]*)\"|(.*))$", re.MULTILINE)
-_APK_WHO_OWNS_RE = re.compile(r" is owned by ([^\s\-]+)-([^\s]+)\Z", re.MULTILINE)
+_APK_WHO_OWNS_RE = re.compile(r" is owned by ([^\s\-]+)-([^\s]+)$", re.MULTILINE)
 _DPKG_SEARCH_RE = re.compile(r"^([^:]+):")
 _DPKG_VERSION_RE = re.compile(r"^Version: ([^\s]+)", re.MULTILINE)
 _APT_FILE_SEARCH_RE = re.compile(r"^([^:]+): ")
@@ -41,7 +41,9 @@ class ProvidedBy:
         parts = ["pkg:", self.package_type.lower(), "/"]
         if self.distro:
             parts.extend((_quote_purl(self.distro), "/"))
-        parts.extend((_quote_purl(self.package_name), "@", _quote_purl(self.package_version)))
+        parts.extend(
+            (_quote_purl(self.package_name), "@", _quote_purl(self.package_version))
+        )
         return "".join(parts)
 
 
@@ -213,14 +215,13 @@ def _quote_purl(value: str) -> str:
     Quotes according to PURL rules which are different from
     typical URL percent encoding.
     """
-    return quote(value, safe='')
+    return quote(value, safe="")
 
 
 def _main():
-    if len(sys.argv) !=2:
+    if len(sys.argv) != 2:
         print(
-            "Must provide single path argument "
-            "('$ python -m whichprovides <path>')",
+            "Must provide single path argument " "('$ python -m whichprovides <path>')",
             file=sys.stderr,
         )
         sys.exit(1)

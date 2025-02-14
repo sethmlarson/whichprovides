@@ -1,0 +1,100 @@
+import pathlib
+import re
+import shutil
+import subprocess
+import typing
+
+import pytest
+
+
+class SubprocessProtocol(typing.Protocol):
+    def __call__(self, *args, **kwargs) -> subprocess.Popen:
+        pass
+
+
+@pytest.fixture(scope="session")
+def docker() -> SubprocessProtocol:
+    docker_bin = shutil.which("docker")
+    if not docker_bin:
+        pytest.skip("Docker isn't available, skipping test")
+
+    def run_docker(argv, **kwargs) -> subprocess.Popen:
+        kwargs.setdefault("stdout", subprocess.PIPE)
+        kwargs.setdefault("stderr", subprocess.STDOUT)
+        return subprocess.Popen([docker_bin, *argv], **kwargs)
+
+    yield run_docker
+
+
+def run_commands_in_docker(docker, *, image: str, commands: list[str]):
+    src_dir = pathlib.Path(__file__).absolute().parent.parent
+    argv = [
+        "run",
+        "--rm",
+        "-t",
+        "-v",
+        f"{src_dir}:/src:ro",
+        image,
+        "sh",
+        "-c",
+        ";".join(commands),
+    ]
+    return docker(argv)
+
+
+def test_apk(docker):
+    proc = run_commands_in_docker(
+        docker=docker,
+        image="alpine:3.21",
+        commands=[
+            "apk add python3",
+            "python3 -m venv venv",
+            "venv/bin/python -m pip install /src",
+            "venv/bin/python -m whichprovides /usr/bin/python",
+        ],
+    )
+    proc.wait(timeout=30)
+    assert proc.returncode == 0
+    purl = proc.stdout.read().decode().strip().split("\n")[-1]
+    assert re.match(
+        r"^pkg:apk\/alpine\/python3@3.[0-9]+\.[0-9]+-r[0-9]+$", purl
+    )  # pkg:apk/alpine/python3@3.11.11-r0
+
+
+def test_apt(docker):
+    proc = run_commands_in_docker(
+        docker=docker,
+        image="debian:bookworm",
+        commands=[
+            "apt-get update",
+            "apt-get install --yes --no-install-recommends python3 python3-venv python3-pip",
+            "python3 -m venv venv",
+            "venv/bin/python -m pip install /src",
+            "venv/bin/python -m whichprovides /usr/bin/python3",
+        ],
+    )
+    proc.wait(timeout=30)
+    assert proc.returncode == 0, proc.stdout.read().decode()
+    purl = proc.stdout.read().decode().strip().split("\n")[-1]
+    assert re.match(
+        r"^pkg:deb\/debian\/python3-minimal@3\.[0-9]+\.[0-9]+-[0-9]+%2B[a-z0-9]+$", purl
+    ), purl  # pkg:deb/debian/python3-minimal@3.11.2-1%2Bb1
+
+
+def test_rpm(docker):
+    proc = run_commands_in_docker(
+        docker=docker,
+        image="almalinux:9",
+        commands=[
+            "yum install --assumeyes python3.12",
+            "python3.12 -m venv venv",
+            "venv/bin/python -m pip install /src",
+            "venv/bin/python -m whichprovides /usr/bin/python3.12",
+        ],
+    )
+    proc.wait(timeout=60)
+    assert proc.returncode == 0, proc.stdout.read().decode()
+    purl = proc.stdout.read().decode().strip().split("\n")[-1]
+    assert re.match(
+        r"^pkg:rpm/almalinux/python3.[0-9]+@3.[0-9]+.[0-9]+-[0-9a-z_\.\-]+$", purl
+    ), purl  # pkg:rpm/almalinux/python3.12@3.12.5-2.el9_5.2
