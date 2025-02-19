@@ -9,6 +9,11 @@ license = "MIT"
 license-files = ["LICENSE"]
 dynamic = ["version"]
 
+[project.urls]
+"Home Page" = "https://codeberg.org/sethmlarson/whichprovides"
+"Documentation" = "https://codeberg.org/sethmlarson/whichprovides"
+"Source Code" = "https://codeberg.org/sethmlarson/whichprovides"
+
 [tool.hatch.version]
 path = "src/whichprovides/__init__.py"
 
