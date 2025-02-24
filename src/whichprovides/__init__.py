@@ -15,7 +15,7 @@ import typing
 from urllib.parse import quote
 
 __all__ = ["whichprovides", "ProvidedBy"]
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 _PACKAGE_MANAGER_BINS: dict[str, str | typing.Literal[False]] = {}
 _OS_RELEASE_LINES_RE = re.compile(r"^([A-Z_]+)=(?:\"([^\"]*)\"|(.*))$", re.MULTILINE)
