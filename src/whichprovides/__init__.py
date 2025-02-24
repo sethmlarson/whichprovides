@@ -6,6 +6,7 @@ functionality across many package managers.
 """
 
 import dataclasses
+import pathlib
 import re
 import shutil
 import subprocess
@@ -96,6 +97,12 @@ def _package_manager_bin(
 def whichprovides(filepath: str) -> ProvidedBy | None:
     """Return a package URL (PURL) for the package that provides a file"""
     distro = _os_release().get("ID", None)
+    filepath = pathlib.Path(filepath).absolute()
+
+    # Resolve links to an actual filepath.
+    # .resolve() also makes a path absolute.
+    if filepath.is_symlink():
+        filepath = filepath.resolve()
 
     # apk (Alpine)
     if distro and (apk_bin := _package_manager_bin("apk")):
@@ -103,7 +110,7 @@ def whichprovides(filepath: str) -> ProvidedBy | None:
             # $ apk info --who-owns /bin/bash
             # /bin/bash is owned by bash-5.2.26-r0
             stdout = subprocess.check_output(
-                [apk_bin, "info", "--who-owns", filepath],
+                [apk_bin, "info", "--who-owns", str(filepath)],
                 stderr=subprocess.DEVNULL,
             ).decode()
             if match := _APK_WHO_OWNS_RE.search(stdout):
@@ -129,7 +136,7 @@ def whichprovides(filepath: str) -> ProvidedBy | None:
                     "-qf",
                     "--queryformat",
                     "%{NAME} %{VERSION} %{RELEASE} %{ARCH}",
-                    filepath,
+                    str(filepath),
                 ],
                 stderr=subprocess.DEVNULL,
             ).decode()
@@ -151,7 +158,7 @@ def whichprovides(filepath: str) -> ProvidedBy | None:
             # $ dpkg -S /bin/bash
             # bash: /bin/bash
             stdout = subprocess.check_output(
-                [dpkg_bin, "-S", filepath],
+                [dpkg_bin, "-S", str(filepath)],
                 stderr=subprocess.DEVNULL,
             ).decode()
             if match := _DPKG_SEARCH_RE.search(stdout):
@@ -161,39 +168,6 @@ def whichprovides(filepath: str) -> ProvidedBy | None:
                 # Version: 5.1-6ubuntu1.1
                 stdout = subprocess.check_output(
                     [dpkg_bin, "-s", package_name],
-                    stderr=subprocess.DEVNULL,
-                ).decode()
-                if match := _DPKG_VERSION_RE.search(stdout):
-                    package_version = match.group(1)
-                    return ProvidedBy(
-                        package_type="deb",
-                        distro=distro,
-                        package_name=package_name,
-                        package_version=package_version,
-                    )
-        except subprocess.CalledProcessError:
-            pass
-
-    # apt (Ubuntu, slower than Debian)
-    if (
-        distro
-        and (apt_bin := _package_manager_bin("apt"))
-        and (apt_file_bin := _package_manager_bin("apt-file", allowed_returncodes={2}))
-    ):
-        try:
-            # $ apt-file search <path>
-            # apt-file search <path>
-            # Finding relevant cache files to search ...
-            # ...
-            # libwebpdemux2: /usr/lib/x86_64-linux-gnu/libwebpdemux.so.2.0.9
-            stdout = subprocess.check_output(
-                [apt_file_bin, "search", filepath],
-                stderr=subprocess.DEVNULL,
-            ).decode()
-            if match := _APT_FILE_SEARCH_RE.search(stdout):
-                package_name = match.group(1)
-                stdout = subprocess.check_output(
-                    [apt_bin, "show", package_name],
                     stderr=subprocess.DEVNULL,
                 ).decode()
                 if match := _DPKG_VERSION_RE.search(stdout):
