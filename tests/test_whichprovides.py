@@ -56,8 +56,8 @@ def test_apk(docker):
     proc.wait(timeout=30)
     assert proc.returncode == 0
     purl = proc.stdout.read().decode().strip().split("\n")[-1]
-    assert re.match(
-        r"^pkg:apk\/alpine\/python3@3\.[0-9a-zA-Z.-]+$", purl
+    assert re.search(
+        r"pkg:apk\/alpine\/python3@3\.[0-9a-zA-Z.-]+$", purl
     )  # pkg:apk/alpine/python3@3.11.11-r0
 
 
@@ -76,8 +76,8 @@ def test_apt(docker):
     proc.wait(timeout=30)
     assert proc.returncode == 0, proc.stdout.read().decode()
     purl = proc.stdout.read().decode().strip().split("\n")[-1]
-    assert re.match(
-        r"^pkg:deb\/debian\/python3[.0-9]+-minimal@3\.[0-9a-zA-Z.%-]+$", purl
+    assert re.search(
+        r"pkg:deb\/debian\/python3[.0-9]+-minimal@3\.[0-9a-zA-Z.%-]+$", purl
     ), purl  # pkg:deb/debian/python3-minimal@3.11.2-1%2Bb1
 
 
@@ -96,31 +96,37 @@ def test_apt_ubuntu(docker):
     proc.wait(timeout=60)
     assert proc.returncode == 0, proc.stdout.read().decode()
     purl = proc.stdout.read().decode().strip().split("\n")[-1]
-    assert re.match(
-        r"^pkg:deb/ubuntu/python3[.0-9]+-minimal@3\.[0-9a-zA-Z.%-]+$", purl
+    assert re.search(
+        r"pkg:deb/ubuntu/python3[.0-9]+-minimal@3\.[0-9a-zA-Z.%-]+$", purl
     ), purl  # pkg:deb/ubuntu/python3-minimal@3.12.3-0ubuntu2
 
 
-def test_apt_symlink(docker):
-    # The file 'libwebpmux.so' is a symlink.
+@pytest.mark.parametrize(
+    ["package", "path"],
+    [
+        ("libopenblas0-pthread", "/usr/lib/x86_64-linux-gnu/libblas.so.3"),
+        ("libwebpdemux2", "/lib/x86_64-linux-gnu/libwebpdemux.so.2"),
+    ],
+)
+def test_apt_symlink(docker, package, path):
     proc = run_commands_in_docker(
         docker=docker,
         image="ubuntu:24.04",
         commands=[
             "apt-get update",
-            "DEBIAN_FRONTEND=noninteractive apt-get install --yes --no-install-recommends python3 python3-venv python3-pip libopenblas0-pthread",
+            f"DEBIAN_FRONTEND=noninteractive apt-get install --yes --no-install-recommends python3 python3-venv python3-pip {package}",
             "python3 -m venv venv",
             "venv/bin/python -m pip install /src",
             # This package uses the Ubuntu 'alternatives' system
             # and thus is a symlink to the actual binary.
-            "venv/bin/python -m whichprovides /usr/lib/x86_64-linux-gnu/libblas.so.3",
+            f"venv/bin/python -m whichprovides {path}",
         ],
     )
     proc.wait(timeout=60)
     assert proc.returncode == 0, proc.stdout.read().decode()
     purl = proc.stdout.read().decode().strip().split("\n")[-1]
-    assert re.match(
-        r"^pkg:deb/ubuntu/libopenblas0-pthread@[0-9a-zA-Z.%-]+$", purl
+    assert re.search(
+        rf"pkg:deb/ubuntu/{package}@[0-9a-zA-Z.%-]+$", purl
     ), purl  # pkg:deb/ubuntu/libopenblas0-pthread@0.3.26%2Bds-1
 
 
@@ -138,6 +144,6 @@ def test_rpm(docker):
     proc.wait(timeout=60)
     assert proc.returncode == 0, proc.stdout.read().decode()
     purl = proc.stdout.read().decode().strip().split("\n")[-1]
-    assert re.match(
-        r"^pkg:rpm/almalinux/python3.[0-9]+@3.[0-9]+.[0-9]+-[0-9a-z_\.\-]+$", purl
+    assert re.search(
+        r"pkg:rpm/almalinux/python3.[0-9]+@3.[0-9]+.[0-9]+-[0-9a-z_\.\-]+$", purl
     ), purl  # pkg:rpm/almalinux/python3.12@3.12.5-2.el9_5.2

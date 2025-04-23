@@ -22,7 +22,7 @@ _OS_RELEASE_LINES_RE = re.compile(r"^([A-Z_]+)=(?:\"([^\"]*)\"|(.*))$", re.MULTI
 _APK_WHO_OWNS_RE = re.compile(r" is owned by ([^\s\-]+)-([^\s]+)$", re.MULTILINE)
 _DPKG_SEARCH_RE = re.compile(r"^([^:]+):")
 _DPKG_VERSION_RE = re.compile(r"^Version: ([^\s]+)", re.MULTILINE)
-_APT_FILE_SEARCH_RE = re.compile(r"^([^:]+): ")
+_APT_FILE_SEARCH_RE = re.compile(r"^([^:]+): (.+)$", re.MULTILINE)
 
 
 @dataclasses.dataclass
@@ -35,6 +35,14 @@ class ProvidedBy:
     @property
     def purl(self) -> str:
         """The Package URL (PURL) of the providing package"""
+
+        def _quote_purl(value: str) -> str:
+            """
+            Quotes according to PURL rules which are different from
+            typical URL percent encoding.
+            """
+            return quote(value, safe="")
+
         # PURL disallows many characters in the package type field.
         if not re.match(r"^[a-zA-Z0-9\+\-\.]+$", self.package_type):
             raise ValueError("Package type must be ASCII letters, numbers, +, -, and .")
@@ -48,64 +56,93 @@ class ProvidedBy:
         return "".join(parts)
 
 
-def _os_release() -> dict[str, str]:
-    """Dumb method of finding os-release information."""
-    try:
-        with open("/etc/os-release") as f:
-            os_release = {}
-            for name, value_quoted, value_unquoted in _OS_RELEASE_LINES_RE.findall(
-                f.read()
-            ):
-                value = value_quoted if value_quoted else value_unquoted
-                os_release[name] = value
-            return os_release
-    except OSError:
-        return {}
+class PackageProvider:
+    _has_bin_cache: dict[str, typing.Union[str, bool]] = {}
 
+    @staticmethod
+    def os_release() -> dict[str, str]:
+        """Dumb method of finding os-release information."""
+        try:
+            with open("/etc/os-release") as f:
+                os_release = {}
+                for name, value_quoted, value_unquoted in _OS_RELEASE_LINES_RE.findall(
+                    f.read()
+                ):
+                    value = value_quoted if value_quoted else value_unquoted
+                    os_release[name] = value
+                return os_release
+        except OSError:
+            return {}
 
-def _package_manager_bin(
-    binaryname: str, *, allowed_returncodes: None | set[int] = None
-) -> str | None:
-    has_bin = _PACKAGE_MANAGER_BINS.get(binaryname)
-    assert has_bin is not True
-    if has_bin is False:
-        return None
-    elif has_bin is not None:
-        return has_bin
-    bin_which = shutil.which(binaryname)
-    if bin_which is None:  # Cache the 'not-found' result.
-        _PACKAGE_MANAGER_BINS[binaryname] = False
-        return None
-    try:
-        subprocess.check_call(
-            [bin_which, "--version"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        _PACKAGE_MANAGER_BINS[binaryname] = bin_which
-        return bin_which
-    except subprocess.CalledProcessError as e:
-        # If running --version returns an non-zero exit we
-        # explicitly allow that here.
-        if allowed_returncodes and e.returncode in allowed_returncodes:
-            _PACKAGE_MANAGER_BINS[binaryname] = bin_which
+    @staticmethod
+    def distro() -> str | None:
+        return PackageProvider.os_release().get("ID", None)
+
+    @classmethod
+    def which(
+        cls, bin: str, *, allowed_returncodes: None | set[int] = None
+    ) -> str | None:
+        """which, but tries to execute the program, too!"""
+        cached_bin = cls._has_bin_cache.get(bin)
+        assert cached_bin is not True
+        if cached_bin is False:
+            return None
+        elif cached_bin is not None:
+            return cached_bin
+        bin_which = shutil.which(bin)
+        if bin_which is None:  # Cache the 'not-found' result.
+            cls._has_bin_cache[bin] = False
+            return None
+        try:
+            subprocess.check_call(
+                [bin_which, "--version"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            cls._has_bin_cache[bin] = bin_which
             return bin_which
-        _PACKAGE_MANAGER_BINS[binaryname] = False
-    return None
+        except subprocess.CalledProcessError as e:
+            # If running --version returns an non-zero exit we
+            # explicitly allow that here.
+            if allowed_returncodes and e.returncode in allowed_returncodes:
+                cls._has_bin_cache[bin] = bin_which
+                return bin_which
+            cls._has_bin_cache[bin] = False
+        return None
+
+    @classmethod
+    def is_available(cls) -> bool:
+        return False
+
+    @classmethod
+    def whichprovides(cls, filepaths: list[str]) -> dict[str, ProvidedBy]:
+        raise NotImplementedError()
 
 
-def whichprovides(filepath: str) -> ProvidedBy | None:
-    """Return a package URL (PURL) for the package that provides a file"""
-    distro = _os_release().get("ID", None)
-    filepath = pathlib.Path(filepath).absolute()
+class _SinglePackageProvider(PackageProvider):
+    """Abstract PackageProvider for single-filepath APIs"""
 
-    # Resolve links to an actual filepath.
-    # .resolve() also makes a path absolute.
-    if filepath.is_symlink():
-        filepath = filepath.resolve()
+    @classmethod
+    def whichprovides(cls, filepaths: list[str]) -> dict[str, ProvidedBy]:
+        results = {}
+        for filepath in filepaths:
+            if provided_by := cls.whichprovides1(filepath):
+                results[filepath] = provided_by
+        return results
 
-    # apk (Alpine)
-    if distro and (apk_bin := _package_manager_bin("apk")):
+    @classmethod
+    def whichprovides1(cls, filepath: str) -> ProvidedBy | None:
+        raise NotImplementedError()
+
+
+class ApkPackageProvider(_SinglePackageProvider):
+    @classmethod
+    def is_available(cls) -> bool:
+        return bool(cls.which("apk") and cls.distro())
+
+    @classmethod
+    def whichprovides1(cls, filepath: str) -> ProvidedBy | None:
+        apk_bin = cls.which("apk")
         try:
             # $ apk info --who-owns /bin/bash
             # /bin/bash is owned by bash-5.2.26-r0
@@ -114,19 +151,26 @@ def whichprovides(filepath: str) -> ProvidedBy | None:
                 stderr=subprocess.DEVNULL,
             ).decode()
             if match := _APK_WHO_OWNS_RE.search(stdout):
-                package_name = match.group(1)
-                package_version = match.group(2)
                 return ProvidedBy(
                     package_type="apk",
-                    distro=distro,
-                    package_name=package_name,
-                    package_version=package_version,
+                    distro=cls.distro(),
+                    package_name=match.group(1),
+                    package_version=match.group(2),
                 )
         except subprocess.CalledProcessError:
             pass
+        return None
 
-    # rpm (CentOS, Red Hat, AlmaLinux, Rocky Linux)
-    if distro and (rpm_bin := _package_manager_bin("rpm")):
+
+class RpmPackageProvider(_SinglePackageProvider):
+    @classmethod
+    def is_available(cls) -> bool:
+        return bool(cls.which("rpm") and cls.distro())
+
+    @classmethod
+    def whichprovides1(cls, filepath: str) -> ProvidedBy | None:
+        distro = cls.os_release().get("ID", None)
+        rpm_bin = cls.which("rpm")
         try:
             # $ rpm -qf --queryformat "%{NAME} %{VERSION} %{RELEASE} ${ARCH}" /bin/bash
             # bash 4.4.20 4.el8_6
@@ -151,9 +195,18 @@ def whichprovides(filepath: str) -> ProvidedBy | None:
             )
         except subprocess.CalledProcessError:
             pass
+        return None
 
-    # dpkg (Debian, Ubuntu)
-    if distro and (dpkg_bin := _package_manager_bin("dpkg")):
+
+class DpkgPackageProvider(_SinglePackageProvider):
+    @classmethod
+    def is_available(cls) -> bool:
+        return bool(cls.which("dpkg") and cls.distro())
+
+    @classmethod
+    def whichprovides1(cls, filepath: str) -> ProvidedBy | None:
+        distro = cls.os_release().get("ID", None)
+        dpkg_bin = cls.which("dpkg")
         try:
             # $ dpkg -S /bin/bash
             # bash: /bin/bash
@@ -171,8 +224,52 @@ def whichprovides(filepath: str) -> ProvidedBy | None:
                     stderr=subprocess.DEVNULL,
                 ).decode()
                 if match := _DPKG_VERSION_RE.search(stdout):
-                    package_version = match.group(1)
                     return ProvidedBy(
+                        package_type="deb",
+                        distro=distro,
+                        package_name=package_name,
+                        package_version=match.group(1),
+                    )
+        except subprocess.CalledProcessError:
+            pass
+        return None
+
+
+class AptFilePackageProvider(PackageProvider):
+    @classmethod
+    def is_available(cls) -> bool:
+        return bool(
+            cls.which("apt")
+            and cls.which("apt-file", allowed_returncodes={2})
+            and cls.distro()
+        )
+
+    @classmethod
+    def whichprovides(cls, filepaths: list[str]) -> dict[str, ProvidedBy]:
+        distro = cls.os_release().get("ID", None)
+        apt_bin = cls.which("apt")
+        apt_file_bin = cls.which("apt-file", allowed_returncodes={2})
+        results = {}
+        try:
+            # $ echo '\n'.join(paths) | apt-file search --from-file -
+            # Finding relevant cache files to search ...
+            # ...
+            # libwebpdemux2: /usr/lib/x86_64-linux-gnu/libwebpdemux.so.2.0.9
+            stdout = subprocess.check_output(
+                [apt_file_bin, "search", "--from-file", "-"],
+                stderr=subprocess.DEVNULL,
+                input=b"\n".join(
+                    [str(filepath).encode("utf-8") for filepath in filepaths]
+                ),
+            ).decode()
+            for package_name, filepath in _APT_FILE_SEARCH_RE.findall(stdout):
+                stdout = subprocess.check_output(
+                    [apt_bin, "show", package_name],
+                    stderr=subprocess.DEVNULL,
+                ).decode()
+                if match := _DPKG_VERSION_RE.search(stdout):
+                    package_version = match.group(1)
+                    results[filepath] = ProvidedBy(
                         package_type="deb",
                         distro=distro,
                         package_name=package_name,
@@ -180,33 +277,65 @@ def whichprovides(filepath: str) -> ProvidedBy | None:
                     )
         except subprocess.CalledProcessError:
             pass
+        return results
 
-    return None
 
+def whichprovides(filepath: str | list[str]) -> dict[str, ProvidedBy]:
+    """Return a package URL (PURL) for the package that provides a file"""
+    if isinstance(filepath, str):
+        filepaths = [filepath]
+    else:
+        filepaths = filepath
 
-def _quote_purl(value: str) -> str:
-    """
-    Quotes according to PURL rules which are different from
-    typical URL percent encoding.
-    """
-    return quote(value, safe="")
+    # Link between the original path to the resolved
+    # path and then allocate a structure for results.
+    resolved_filepaths = {
+        str(pathlib.Path(filepath).resolve()): filepath for filepath in filepaths
+    }
+
+    def all_subclasses(cls):
+        subclasses = set()
+        for subcls in cls.__subclasses__():
+            subclasses.add(subcls)
+            subclasses |= all_subclasses(subcls)
+        return subclasses
+
+    filepath_provided_by = {}
+    for package_provider in all_subclasses(PackageProvider):
+        remaining = set(resolved_filepaths) - set(filepath_provided_by)
+        if not remaining:
+            break
+        if not package_provider.is_available():
+            continue
+        results = package_provider.whichprovides(remaining)
+        filepath_provided_by.update(results)
+
+    return {
+        resolved_filepaths[filepath]: value
+        for filepath, value in filepath_provided_by.items()
+    }
 
 
 def _main():
-    if len(sys.argv) != 2:
+    if len(sys.argv) < 2:
         print(
-            "Must provide single path argument " "('$ python -m whichprovides <path>')",
+            "Must provide one or more path argument "
+            "('$ python -m whichprovides <paths>')",
             file=sys.stderr,
         )
         sys.exit(1)
 
-    filepath = sys.argv[1]
-    provided_by = whichprovides(filepath)
-    if provided_by:
-        print(provided_by.purl)
-    else:
-        print(f"No known package providing {filepath}", file=sys.stderr)
-        sys.exit(1)
+    filepaths = sys.argv[1:]
+    provided_bys = whichprovides(filepaths)
+    exit_code = 0
+    for filepath in filepaths:
+        provided_by = provided_bys.get(filepath)
+        if provided_by:
+            print(f"{filepath}: {provided_by.purl}")
+        else:
+            print(f"No known package providing {filepath}", file=sys.stderr)
+            exit_code = 1
+    sys.exit(exit_code)
 
 
 if __name__ == "__main__":
