@@ -17,7 +17,6 @@ from urllib.parse import quote
 __all__ = ["whichprovides", "ProvidedBy"]
 __version__ = "0.3.0"
 
-_PACKAGE_MANAGER_BINS: dict[str, str | typing.Literal[False]] = {}
 _OS_RELEASE_LINES_RE = re.compile(r"^([A-Z_]+)=(?:\"([^\"]*)\"|(.*))$", re.MULTILINE)
 _APK_WHO_OWNS_RE = re.compile(r" is owned by ([^\s\-]+)-([^\s]+)$", re.MULTILINE)
 _DPKG_SEARCH_RE = re.compile(r"^([^:]+):")
@@ -30,7 +29,7 @@ class ProvidedBy:
     package_type: str
     package_name: str
     package_version: str
-    distro: str | None = None
+    distro: typing.Union[str, None] = None
 
     @property
     def purl(self) -> str:
@@ -78,13 +77,13 @@ class PackageProvider:
             return {}
 
     @staticmethod
-    def distro() -> str | None:
+    def distro() -> typing.Optional[str]:
         return PackageProvider.os_release().get("ID", None)
 
     @classmethod
     def which(
-        cls, bin: str, *, allowed_returncodes: None | set[int] = None
-    ) -> str | None:
+        cls, bin: str, *, allowed_returncodes: typing.Optional[set[int]] = None
+    ) -> typing.Optional[str]:
         """which, but tries to execute the program, too!"""
         cached_bin = cls._has_bin_cache.get(bin)
         assert cached_bin is not True
@@ -134,7 +133,7 @@ class _SinglePackageProvider(PackageProvider):
         return results
 
     @classmethod
-    def whichprovides1(cls, filepath: str) -> ProvidedBy | None:
+    def whichprovides1(cls, filepath: str) -> typing.Optional[ProvidedBy]:
         raise NotImplementedError()
 
 
@@ -144,7 +143,7 @@ class ApkPackageProvider(_SinglePackageProvider):
         return bool(cls.which("apk") and cls.distro())
 
     @classmethod
-    def whichprovides1(cls, filepath: str) -> ProvidedBy | None:
+    def whichprovides1(cls, filepath: str) -> typing.Optional[ProvidedBy]:
         apk_bin = cls.which("apk")
         distro = cls.distro()
         assert apk_bin is not None and distro is not None
@@ -173,7 +172,7 @@ class RpmPackageProvider(_SinglePackageProvider):
         return bool(cls.which("rpm") and cls.distro())
 
     @classmethod
-    def whichprovides1(cls, filepath: str) -> ProvidedBy | None:
+    def whichprovides1(cls, filepath: str) -> typing.Optional[ProvidedBy]:
         rpm_bin = cls.which("rpm")
         distro = cls.distro()
         assert rpm_bin is not None and distro is not None
@@ -210,7 +209,7 @@ class DpkgPackageProvider(_SinglePackageProvider):
         return bool(cls.which("dpkg") and cls.distro())
 
     @classmethod
-    def whichprovides1(cls, filepath: str) -> ProvidedBy | None:
+    def whichprovides1(cls, filepath: str) -> typing.Optional[ProvidedBy]:
         dpkg_bin = cls.which("dpkg")
         distro = cls.distro()
         assert dpkg_bin is not None and distro is not None
@@ -306,7 +305,7 @@ def _package_providers() -> list[type[PackageProvider]]:
     return sorted(all_subclasses(PackageProvider), key=lambda p: p._resolve_order)
 
 
-def whichprovides(filepath: str | list[str]) -> dict[str, ProvidedBy]:
+def whichprovides(filepath: typing.Union[str, list[str]]) -> dict[str, ProvidedBy]:
     """Return a package URL (PURL) for the package that provides a file"""
     if isinstance(filepath, str):
         filepaths = [filepath]
