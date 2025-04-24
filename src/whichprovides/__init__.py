@@ -15,7 +15,7 @@ import typing
 from urllib.parse import quote
 
 __all__ = ["whichprovides", "ProvidedBy"]
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 _OS_RELEASE_LINES_RE = re.compile(r"^([A-Z_]+)=(?:\"([^\"]*)\"|(.*))$", re.MULTILINE)
 _APK_WHO_OWNS_RE = re.compile(r" is owned by ([^\s\-]+)-([^\s]+)$", re.MULTILINE)

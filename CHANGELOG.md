@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.0
+
+* Added support for multiple file paths to CLI.
+* Added prioritization of package information providers to favor
+  faster providers over slow ones.
+
 ## 0.3.0
 
 * Added support for discovering "alternatives" that are implemented with symlinks.
