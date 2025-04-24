@@ -57,6 +57,9 @@ class ProvidedBy:
 
 
 class PackageProvider:
+    # Order in which the provider should be resolved.
+    # Lower is attempted earlier than higher numbers.
+    _resolve_order: int = 0
     _has_bin_cache: dict[str, typing.Union[str, bool]] = {}
 
     @staticmethod
@@ -115,7 +118,7 @@ class PackageProvider:
         return False
 
     @classmethod
-    def whichprovides(cls, filepaths: list[str]) -> dict[str, ProvidedBy]:
+    def whichprovides(cls, filepaths: typing.Collection[str]) -> dict[str, ProvidedBy]:
         raise NotImplementedError()
 
 
@@ -123,7 +126,7 @@ class _SinglePackageProvider(PackageProvider):
     """Abstract PackageProvider for single-filepath APIs"""
 
     @classmethod
-    def whichprovides(cls, filepaths: list[str]) -> dict[str, ProvidedBy]:
+    def whichprovides(cls, filepaths: typing.Collection[str]) -> dict[str, ProvidedBy]:
         results = {}
         for filepath in filepaths:
             if provided_by := cls.whichprovides1(filepath):
@@ -143,6 +146,8 @@ class ApkPackageProvider(_SinglePackageProvider):
     @classmethod
     def whichprovides1(cls, filepath: str) -> ProvidedBy | None:
         apk_bin = cls.which("apk")
+        distro = cls.distro()
+        assert apk_bin is not None and distro is not None
         try:
             # $ apk info --who-owns /bin/bash
             # /bin/bash is owned by bash-5.2.26-r0
@@ -153,7 +158,7 @@ class ApkPackageProvider(_SinglePackageProvider):
             if match := _APK_WHO_OWNS_RE.search(stdout):
                 return ProvidedBy(
                     package_type="apk",
-                    distro=cls.distro(),
+                    distro=distro,
                     package_name=match.group(1),
                     package_version=match.group(2),
                 )
@@ -169,8 +174,9 @@ class RpmPackageProvider(_SinglePackageProvider):
 
     @classmethod
     def whichprovides1(cls, filepath: str) -> ProvidedBy | None:
-        distro = cls.os_release().get("ID", None)
         rpm_bin = cls.which("rpm")
+        distro = cls.distro()
+        assert rpm_bin is not None and distro is not None
         try:
             # $ rpm -qf --queryformat "%{NAME} %{VERSION} %{RELEASE} ${ARCH}" /bin/bash
             # bash 4.4.20 4.el8_6
@@ -205,8 +211,9 @@ class DpkgPackageProvider(_SinglePackageProvider):
 
     @classmethod
     def whichprovides1(cls, filepath: str) -> ProvidedBy | None:
-        distro = cls.os_release().get("ID", None)
         dpkg_bin = cls.which("dpkg")
+        distro = cls.distro()
+        assert dpkg_bin is not None and distro is not None
         try:
             # $ dpkg -S /bin/bash
             # bash: /bin/bash
@@ -236,6 +243,9 @@ class DpkgPackageProvider(_SinglePackageProvider):
 
 
 class AptFilePackageProvider(PackageProvider):
+    # apt-file is slow, so resolve this one later.
+    _resolve_order = 100
+
     @classmethod
     def is_available(cls) -> bool:
         return bool(
@@ -245,10 +255,11 @@ class AptFilePackageProvider(PackageProvider):
         )
 
     @classmethod
-    def whichprovides(cls, filepaths: list[str]) -> dict[str, ProvidedBy]:
-        distro = cls.os_release().get("ID", None)
+    def whichprovides(cls, filepaths: typing.Collection[str]) -> dict[str, ProvidedBy]:
         apt_bin = cls.which("apt")
         apt_file_bin = cls.which("apt-file", allowed_returncodes={2})
+        distro = cls.distro()
+        assert apt_bin is not None and apt_file_bin is not None and distro is not None
         results = {}
         try:
             # $ echo '\n'.join(paths) | apt-file search --from-file -
@@ -280,6 +291,21 @@ class AptFilePackageProvider(PackageProvider):
         return results
 
 
+def _package_providers() -> list[type[PackageProvider]]:
+    """Returns a list of package providers sorted in
+    the order that they should be attempted.
+    """
+
+    def all_subclasses(cls):
+        subclasses = set()
+        for subcls in cls.__subclasses__():
+            subclasses.add(subcls)
+            subclasses |= all_subclasses(subcls)
+        return subclasses
+
+    return sorted(all_subclasses(PackageProvider), key=lambda p: p._resolve_order)
+
+
 def whichprovides(filepath: str | list[str]) -> dict[str, ProvidedBy]:
     """Return a package URL (PURL) for the package that provides a file"""
     if isinstance(filepath, str):
@@ -292,16 +318,8 @@ def whichprovides(filepath: str | list[str]) -> dict[str, ProvidedBy]:
     resolved_filepaths = {
         str(pathlib.Path(filepath).resolve()): filepath for filepath in filepaths
     }
-
-    def all_subclasses(cls):
-        subclasses = set()
-        for subcls in cls.__subclasses__():
-            subclasses.add(subcls)
-            subclasses |= all_subclasses(subcls)
-        return subclasses
-
-    filepath_provided_by = {}
-    for package_provider in all_subclasses(PackageProvider):
+    filepath_provided_by: dict[str, ProvidedBy] = {}
+    for package_provider in _package_providers():
         remaining = set(resolved_filepaths) - set(filepath_provided_by)
         if not remaining:
             break
