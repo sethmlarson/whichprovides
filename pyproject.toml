@@ -27,3 +27,9 @@ include = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/whichprovides"]
+
+[tool.mypy]
+mypy_path = "src"
+exclude = [
+  "^tests/.*"
+]
