@@ -307,22 +307,17 @@ def _package_providers() -> list[type[PackageProvider]]:
     return sorted(all_subclasses(PackageProvider), key=lambda p: p._resolve_order)
 
 
-# Cache the value of PackageProvider.is_available()
-_PACKAGE_PROVIDERS_IS_AVAILABLE: dict[type[PackageProvider], bool] = {}
-
-
-def _available_package_providers() -> (
-    typing.Generator[type[PackageProvider], None, None]
-):
+def _available_package_providers(
+    _is_available_cache: dict[type[PackageProvider], bool] = {}
+) -> typing.Generator[type[PackageProvider], None, None]:
     """We use a generator here because PackageProviders might not
     all need to be queried for 'is_available()' if 'whichprovides()'
     is able to find matches for all file paths.
     """
-    values_cache = _PACKAGE_PROVIDERS_IS_AVAILABLE
     for package_provider in _package_providers():
-        if package_provider not in values_cache:
-            values_cache[package_provider] = package_provider.is_available()
-        if values_cache[package_provider]:
+        if package_provider not in _is_available_cache:
+            _is_available_cache[package_provider] = package_provider.is_available()
+        if _is_available_cache[package_provider]:
             yield package_provider
 
 
