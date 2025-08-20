@@ -6,6 +6,7 @@ functionality across many package managers.
 """
 
 import dataclasses
+import functools
 import pathlib
 import re
 import shutil
@@ -290,6 +291,7 @@ class AptFilePackageProvider(PackageProvider):
         return results
 
 
+@functools.cache
 def _package_providers() -> list[type[PackageProvider]]:
     """Returns a list of package providers sorted in
     the order that they should be attempted.
@@ -305,6 +307,25 @@ def _package_providers() -> list[type[PackageProvider]]:
     return sorted(all_subclasses(PackageProvider), key=lambda p: p._resolve_order)
 
 
+# Cache the value of PackageProvider.is_available()
+_PACKAGE_PROVIDERS_IS_AVAILABLE: dict[type[PackageProvider], bool] = {}
+
+
+def _available_package_providers() -> (
+    typing.Generator[type[PackageProvider], None, None]
+):
+    """We use a generator here because PackageProviders might not
+    all need to be queried for 'is_available()' if 'whichprovides()'
+    is able to find matches for all file paths.
+    """
+    values_cache = _PACKAGE_PROVIDERS_IS_AVAILABLE
+    for package_provider in _package_providers():
+        if package_provider not in values_cache:
+            values_cache[package_provider] = package_provider.is_available()
+        if values_cache[package_provider]:
+            yield package_provider
+
+
 def whichprovides(filepath: typing.Union[str, list[str]]) -> dict[str, ProvidedBy]:
     """Return a package URL (PURL) for the package that provides a file"""
     if isinstance(filepath, str):
@@ -318,12 +339,10 @@ def whichprovides(filepath: typing.Union[str, list[str]]) -> dict[str, ProvidedB
         str(pathlib.Path(filepath).resolve()): filepath for filepath in filepaths
     }
     filepath_provided_by: dict[str, ProvidedBy] = {}
-    for package_provider in _package_providers():
+    for package_provider in _available_package_providers():
         remaining = set(resolved_filepaths) - set(filepath_provided_by)
         if not remaining:
             break
-        if not package_provider.is_available():
-            continue
         results = package_provider.whichprovides(remaining)
         filepath_provided_by.update(results)
 
