@@ -13,7 +13,7 @@ $ python -m pip install whichprovides
 You can also "splat" the module into your own projects:
 
 ```terminal
-$ git clone https://codeberg.org/sethmlarson/whichprovides
+$ git clone https://github.com/sethmlarson/whichprovides
 $ cp whichprovides/src/whichprovides/__init__.py ./whichprovides.py
 ```
 

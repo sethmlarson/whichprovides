@@ -12,9 +12,9 @@ license-files = ["LICENSE"]
 dynamic = ["version"]
 
 [project.urls]
-"Home Page" = "https://codeberg.org/sethmlarson/whichprovides"
-"Documentation" = "https://codeberg.org/sethmlarson/whichprovides"
-"Source Code" = "https://codeberg.org/sethmlarson/whichprovides"
+"Home Page" = "https://github.com/sethmlarson/whichprovides"
+"Documentation" = "https://github.com/sethmlarson/whichprovides"
+"Source Code" = "https://github.com/sethmlarson/whichprovides"
 
 [tool.hatch.version]
 path = "src/whichprovides/__init__.py"
